@@ -1,0 +1,18 @@
+create table {0}(
+	id bigint unsigned auto_increment primary key,
+	time timestamp not null,
+	host varchar(50) not null,
+	client_ip varchar(50) not null,
+	request varchar(191) not null,
+	request_version varchar(10) not null,
+	request_method varchar(10) not null,
+	status int unsigned not null,
+	size int unsigned not null,
+	upstream_addr varchar(50) not null,
+	upstream_status int unsigned not null,
+	upstream_response_time 	decimal(10,3) unsigned not null,
+	request_time 	decimal(10,3) unsigned not null,
+	http_referer 	varchar(191) not null,
+	user_agent varchar(191) not null,
+	x_forwarded_for varchar(191) not null
+)engine=innodb default charset=utf8mb4
