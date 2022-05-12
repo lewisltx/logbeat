@@ -3,40 +3,47 @@ import asyncio
 import os
 import signal
 
-import pyinotify
 import websockets
 from dotenv import dotenv_values
 
 import utils
 
 
-class TrackModifications(pyinotify.ProcessEvent):
-    def my_init(self, ws):
-        self._ws_conn = ws
+async def send_log(queue):
+    uri = "ws://" + config['WS_USER'] + ':' + config['WS_PASS'] + '@' + config['WS_HOST'] + ':' + config['WS_PORT']
+    async for websocket in websockets.connect(uri):
+        try:
+            log = await queue.get()
+            await websocket.send(log)
+            queue.task_done()
+        except websockets.ConnectionClosed:
+            continue
 
-    def process_IN_MODIFY(self, event):
+
+async def watch_log(queue):
+    while True:
         line = log_fp.readline()
         if line:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._ws_conn.send(line))
+            await queue.put(line)
+        else:
+            await asyncio.sleep(1)
 
 
 async def client():
-    uri = "ws://" + config['WS_USER'] + ':' + config['WS_PASS'] + '@' + config['WS_HOST'] + ':' + config['WS_PORT']
-    async with websockets.connect(uri) as websocket:
-        wm = pyinotify.WatchManager()
-        loop = asyncio.get_running_loop()
-        notifier = pyinotify.AsyncioNotifier(wm, loop, default_proc_fun=TrackModifications(ws=websocket))
-        loop.add_signal_handler(signal.SIGTERM, loop.create_task, websocket.close())
-        wm.add_watch(config['WATCH_LOG'], pyinotify.ALL_EVENTS)
-        await asyncio.Future()
-
+    queue = asyncio.Queue()
+    loop = asyncio.get_running_loop()
+    watch_task = asyncio.create_task(watch_log(queue))
+    send_task = asyncio.create_task(send_log(queue))
+    stop = loop.create_future()
+    loop.add_signal_handler(signal.SIGTERM, stop.set_result, None)
+    await stop
+    await queue.join()
+    watch_task.cancel()
+    send_task.cancel()
 
 if __name__ == '__main__':
     '''
-    1. register log file modify event
-    2. connect websocket server
-    3. send log
+    scan log to queue, then send log
     '''
     config = dotenv_values()
     logger = utils.init_logger(config['LOG_FILE'])

@@ -4,13 +4,9 @@
 
 ## requirement
 
-Linux kernel 2.6.13+
-
 python 3.7+
 
 MySQL 5.7+
-
-NOT SUPPORT macOS and Windows
 
 ## install
 
