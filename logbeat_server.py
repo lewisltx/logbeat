@@ -20,17 +20,18 @@ async def log_insert(pool, row):
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
             table_name = config['DB_PREFIX'] + row_month
-            sql = "INSERT INTO " + table_name + " (time, host, client_ip, request, request_version, request_method," \
-                                                 "status, size, upstream_addr, upstream_status, upstream_response_time," \
-                                                 "request_time, http_referer, user_agent, x_forwarded_for) " \
-                  "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            sql = "INSERT INTO " + table_name + "(time, host, client_ip, request_uri, request_query, request_version," \
+                                                "request_method, status, size, upstream_addr, upstream_status, " \
+                                                "upstream_response_time, request_time, http_referer, user_agent, " \
+                                                "x_forwarded_for) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s," \
+                                                "%s, %s, %s, %s, %s)"
             await cursor.execute(sql, tuple(row.values()))
         await conn.commit()
 
 
 def read_create_sql():
     with open('create_table.template') as f:
-        return "" . join(f.readlines())
+        return "".join(f.readlines())
 
 
 async def create_table(pool):
@@ -52,23 +53,29 @@ def parse_log(message):
     """
     raw_json = json.loads(message)
     request_arr = raw_json['request'].split(' ')
+    request_uri = request_arr[1].split('?')
     parsed = {}
     parsed['time'] = raw_json['@timestamp'][0:19]
     parsed['host'] = raw_json['http_host']
     parsed['client_ip'] = raw_json['clientip']
-    parsed['request'] = request_arr[1].split('?')[0]
+    parsed['request_uri'] = request_uri[0][0:191]
+    parsed['request_query'] = '' if len(request_uri) == 1 else request_uri[1][0:191]
     parsed['request_version'] = request_arr[2].split('/')[1]
     parsed['request_method'] = request_arr[0]
     parsed['status'] = raw_json['status'].replace('-', '0')
     parsed['size'] = raw_json['size'].replace('-', '0')
     parsed['upstream_addr'] = raw_json['upstream_addr']
-    parsed['upstream_status'] = raw_json['upstream_status'].replace('-', '0')
-    parsed['upstream_response_time'] = raw_json['upstream_response_time'].replace('-', '0')
+    parsed['upstream_status'] = empty2int(raw_json['upstream_status'].replace('-', '0'))
+    parsed['upstream_response_time'] = empty2int(raw_json['upstream_response_time'].replace('-', '0'))
     parsed['request_time'] = raw_json['request_time'].replace('-', '0')
     parsed['http_referer'] = raw_json['http_referer'][0:191]
     parsed['user_agent'] = raw_json['http_user_agent'][0:191]
     parsed['x_forwarded_for'] = raw_json['http_x_forwarded_for'][0:191]
     return parsed
+
+
+def empty2int(s):
+    return 0 if len(s) == 0 else s
 
 
 async def msg_handler(websocket, mysql_pool):
