@@ -87,7 +87,7 @@ if __name__ == '__main__':
     scan log to queue, then send log
     '''
     config = dotenv_values()
-    logger = utils.init_logger(config['LOG_FILE'])
+    logger = utils.init_logger(config['LOG_FILE'], config['LOG_LEVEL'])
     watch_list = open_files(True)
     watch_task = None
     g_queue = None

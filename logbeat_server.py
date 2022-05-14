@@ -117,6 +117,6 @@ if __name__ == '__main__':
     2. insert received logs into mysql
     '''
     config = dotenv_values()
-    logger = utils.init_logger(config['LOG_FILE'])
+    logger = utils.init_logger(config['LOG_FILE'], config['LOG_LEVEL'])
     current_month = time.strftime('%Y%m')
     asyncio.run(server())
