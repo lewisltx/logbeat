@@ -15,9 +15,11 @@ async def send_log(queue):
     async for websocket in websockets.connect(uri):
         try:
             log = await queue.get()
+            logger.info('log got: %s, %d', log[1:41], len(log))
             await websocket.send(log)
             queue.task_done()
-        except websockets.ConnectionClosed:
+        except Exception as e:
+            logger.info('ws exception: %s', repr(e))
             continue
 
 
@@ -29,6 +31,7 @@ async def watch_log(queue):
                 line = fp.readline()
                 if line:
                     await queue.put(line)
+                    logger.info('log putted: %s, %d', line[1:41], len(line))
                 else:
                     break
         if time.time() - start_time < 1:
