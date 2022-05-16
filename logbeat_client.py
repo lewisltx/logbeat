@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
+import concurrent.futures
+import logging
 import os
 import signal
 import time
@@ -15,50 +17,55 @@ async def send_log(queue):
     async for websocket in websockets.connect(uri):
         try:
             log = await queue.get()
-            logger.info('log got: %s, %d', log[1:41], len(log))
             await websocket.send(log)
             queue.task_done()
-        except Exception as e:
-            logger.info('ws exception: %s', repr(e))
+        except Exception:
+            logging.warning('ws exception', exc_info=True)
             continue
 
 
-async def watch_log(queue):
-    while True:
-        start_time = time.time()
-        for fp in watch_list:
-            while fp.readable():
-                line = fp.readline()
-                if line:
-                    await queue.put(line)
-                    logger.info('log putted: %s, %d', line[1:41], len(line))
-                else:
-                    break
-        if time.time() - start_time < 1:
-            await asyncio.sleep(1)
+async def add_log(queue, watch_list):
+    loop = asyncio.get_running_loop()
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        while True:
+            result = await loop.run_in_executor(pool, watch_log, watch_list)
+            if result:
+                await queue.put(result)
 
 
-def log_rotate():
-    global watch_task, watch_list
-    watch_task.cancel()
-    close_open_files()
-    watch_list = open_files(False)
-    watch_task = asyncio.create_task(watch_log(g_queue))
+def watch_log(watch_list):
+    start_time = time.time()
+    for fp in watch_list:
+        while fp.readable():
+            line = fp.readline()
+            if line:
+                return line
+            else:
+                if time.time() - start_time < 1:
+                    time.sleep(0.5)
+                break
+
+
+# def log_rotate():
+#     global watch_task, watch_list
+#     watch_task.cancel()
+#     close_open_files()
+#     watch_list = open_files(False)
+#     watch_task = asyncio.create_task(watch_log(g_queue))
 
 
 async def client():
-    global watch_task, g_queue
+    watch_list = open_files(True)
     g_queue = asyncio.Queue()
-    loop = asyncio.get_running_loop()
-    watch_task = asyncio.create_task(watch_log(g_queue))
+    watch_task = asyncio.create_task(add_log(g_queue, watch_list))
     send_task = asyncio.create_task(send_log(g_queue))
-    stop = loop.create_future()
-    loop.add_signal_handler(signal.SIGTERM, stop.set_result, None)
-    loop.add_signal_handler(signal.SIGUSR1, log_rotate)
-    await stop
-    watch_task.cancel()
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, watch_task.cancel)
+    await asyncio.gather(*[watch_task, send_task], return_exceptions=True)
     await g_queue.join()
+    watch_task.cancel()
     send_task.cancel()
+    close_open_files(watch_list)
 
 
 def open_files(seek):
@@ -73,13 +80,13 @@ def open_files(seek):
                 current_list.append(log_fp)
         return current_list
     except Exception as e:
-        logger.warning('open log failed: ' + repr(e))
+        logging.warning('open log failed: ' + repr(e))
     if len(current_list) == 0:
-        logger.warning('no available watch log')
+        logging.warning('no available watch log')
         exit(0)
 
 
-def close_open_files():
+def close_open_files(watch_list):
     for fp in watch_list:
         if fp.readable():
             fp.close()
@@ -90,9 +97,5 @@ if __name__ == '__main__':
     scan log to queue, then send log
     '''
     config = dotenv_values()
-    logger = utils.init_logger(config['LOG_FILE'], config['LOG_LEVEL'])
-    watch_list = open_files(True)
-    watch_task = None
-    g_queue = None
+    utils.init_logger(config['LOG_FILE'], config['LOG_LEVEL'])
     asyncio.run(client())
-    close_open_files()

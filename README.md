@@ -36,8 +36,7 @@ mkdir logs && chown logbeat.logbeat logs
 cp .env.template .env
 # 配置env略
 cp logbeat.ini /etc/supervisor/conf.d/ # 客户端需要修改logbeat_server.py为logbeat_client.py
-supervisorctl reread
-supervisorctl start logbeat
+supervisorctl update
 supervisorctl status logbeat
 
 # 切割日志，仅客户端
