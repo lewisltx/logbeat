@@ -29,21 +29,25 @@ async def add_log(queue, watch_list):
     with concurrent.futures.ThreadPoolExecutor() as pool:
         while True:
             result = await loop.run_in_executor(pool, watch_log, watch_list)
-            if result:
-                await queue.put(result)
+            for log in result:
+                await queue.put(log)
 
 
 def watch_log(watch_list):
     start_time = time.time()
+    result = []
     for fp in watch_list:
         while fp.readable():
             line = fp.readline()
             if line:
-                return line
+                result.append(line)
+                if len(result) >= 20:
+                    return result
             else:
-                if time.time() - start_time < 1:
-                    time.sleep(0.5)
                 break
+    if time.time() - start_time < 1:
+        time.sleep(1)
+    return result
 
 
 # def log_rotate():
