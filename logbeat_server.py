@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 import json
+import logging
 import signal
 import time
 
@@ -10,21 +11,27 @@ from dotenv import dotenv_values
 
 import utils
 
+existed_tables = []
+lock = asyncio.Lock()
+
 
 async def log_insert(pool, row):
-    global current_month
+    if not isinstance(row, dict):
+        return False
     row_month = row['time'][0:7].replace('-', '')
-    if row_month != current_month:
-        current_month = row_month
-        await create_table(pool)
+    row_table = config['DB_PREFIX'] + row_month
+    if row_table not in existed_tables:
+        async with lock:
+            if row_table not in existed_tables:
+                created_table = await create_table(pool, row_month)
+                existed_tables.append(created_table)
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            table_name = config['DB_PREFIX'] + row_month
-            sql = "INSERT INTO " + table_name + "(time, host, client_ip, request_uri, request_query, request_version," \
-                                                "request_method, status, size, upstream_addr, upstream_status, " \
-                                                "upstream_response_time, request_time, http_referer, user_agent, " \
-                                                "x_forwarded_for) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s," \
-                                                "%s, %s, %s, %s, %s)"
+            sql = "INSERT INTO " + row_table + "(time, host, client_ip, request_uri, request_query, request_version," \
+                                               "request_method, status, size, upstream_addr, upstream_status, " \
+                                               "upstream_response_time, request_time, http_referer, user_agent, " \
+                                               "x_forwarded_for) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s," \
+                                               "%s, %s, %s, %s, %s)"
             await cursor.execute(sql, tuple(row.values()))
         await conn.commit()
 
@@ -34,14 +41,17 @@ def read_create_sql():
         return "".join(f.readlines())
 
 
-async def create_table(pool):
+async def create_table(pool, month=None):
+    if month is None:
+        month = time.strftime('%Y%m')
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            table_name = config['DB_PREFIX'] + current_month
+            table_name = config['DB_PREFIX'] + month
             sql_content = read_create_sql()
             sql = sql_content.format(table_name)
             await cursor.execute(sql)
         await conn.commit()
+        return table_name
 
 
 def parse_log(message):
@@ -51,7 +61,11 @@ def parse_log(message):
     "upstream_status":"200","upstream_response_time":"0.041","request_time":"0.041",
     "http_referer":"","http_user_agent":"python-requests/2.26.0","http_x_forwarded_for":""}
     """
-    raw_json = json.loads(message)
+    try:
+        raw_json = json.loads(message)
+    except Exception as e:
+        logging.warning(repr(e), exc_info=True)
+        return None
     request_arr = raw_json['request'].split(' ')
     request_uri = request_arr[1].split('?')
     parsed = {}
@@ -84,12 +98,20 @@ async def msg_handler(websocket, mysql_pool):
 
 
 async def init_table(pool):
+    table_list = []
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            sql = "select TABLE_NAME from information_schema.TABLES where TABLE_SCHEMA=%s and TABLE_NAME=%s"
-            await cursor.execute(sql, (config['DB_NAME'], config['DB_PREFIX'] + current_month))
-            if await cursor.fetchone() is None:
-                await create_table(pool)
+            sql = "select TABLE_NAME from information_schema.TABLES where TABLE_SCHEMA=%s"
+            await cursor.execute(sql, (config['DB_NAME']))
+            result = await cursor.fetchall()
+            if result is None:
+                created_table = await create_table(pool)
+                if created_table:
+                    table_list.append(created_table)
+            else:
+                for row in result:
+                    table_list.append(row[0])
+    return table_list
 
 
 async def server():
@@ -98,7 +120,7 @@ async def server():
     mysql_pool = await aiomysql.create_pool(host=config['DB_HOST'], port=int(config['DB_PORT']),
                                             user=config['DB_USER'], password=config['DB_PASS'],
                                             db=config['DB_NAME'], loop=loop)
-    await init_table(mysql_pool)
+    existed_tables.extend(await init_table(mysql_pool))
     loop.add_signal_handler(signal.SIGTERM, stop.set_result, None)
 
     # TODO: support wss
@@ -117,6 +139,5 @@ if __name__ == '__main__':
     2. insert received logs into mysql
     '''
     config = dotenv_values()
-    logger = utils.init_logger(config['LOG_FILE'], config['LOG_LEVEL'])
-    current_month = time.strftime('%Y%m')
+    utils.init_logger(config['LOG_FILE'], config['LOG_LEVEL'])
     asyncio.run(server())
