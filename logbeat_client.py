@@ -16,12 +16,14 @@ async def send_log(queue):
     uri = "ws://" + config['WS_USER'] + ':' + config['WS_PASS'] + '@' + config['WS_HOST'] + ':' + config['WS_PORT']
     async for websocket in websockets.connect(uri):
         try:
-            log = await queue.get()
-            await websocket.send(log)
-            queue.task_done()
-        except Exception:
-            logging.warning('ws exception', exc_info=True)
+            while websocket.open:
+                log = await queue.get()
+                await websocket.send(log)
+                queue.task_done()
+        except websockets.ConnectionClosed:
             continue
+        except Exception as e:
+            logging.warning(repr(e), exc_info=True)
 
 
 async def add_log(queue, watch_list):
@@ -45,6 +47,8 @@ def watch_log(watch_list):
                     return result
             else:
                 break
+        else:
+            logging.warning('not readable: %s', fp.name)
     if time.time() - start_time < 1:
         time.sleep(1)
     return result
@@ -57,15 +61,29 @@ def watch_log(watch_list):
 #     watch_list = open_files(False)
 #     watch_task = asyncio.create_task(watch_log(g_queue))
 
+def show_info(queue, watch_list, watch_task, send_task):
+    logging.info(asyncio.all_tasks())
+    logging.info(queue.qsize())
+    for fp in watch_list:
+        logging.info("%s, %s", fp.name, fp.readable())
+    watch_task.print_stack()
+    send_task.print_stack()
+
 
 async def client():
     watch_list = open_files(True)
-    g_queue = asyncio.Queue()
+    g_queue = asyncio.Queue(maxsize=10000)
     watch_task = asyncio.create_task(add_log(g_queue, watch_list))
     send_task = asyncio.create_task(send_log(g_queue))
     loop = asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGTERM, watch_task.cancel)
-    await asyncio.gather(*[watch_task, send_task], return_exceptions=True)
+    loop.add_signal_handler(signal.SIGUSR2, show_info, g_queue, watch_list, watch_task, send_task)
+    await asyncio.wait([watch_task, send_task], return_when='FIRST_EXCEPTION')
+    try:
+        watch_task.exception()
+        send_task.exception()
+    except Exception as e:
+        logging.warning(repr(e), exc_info=True)
     await g_queue.join()
     watch_task.cancel()
     send_task.cancel()
@@ -76,7 +94,7 @@ def open_files(seek):
     current_list = []
     try:
         for file in config['WATCH_LOG'].split(' '):
-            log_fp = open(file)
+            log_fp = open(file, errors='ignore')
             if log_fp.readable():
                 if seek:
                     log_size = os.stat(file)[6]
