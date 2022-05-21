@@ -23,6 +23,7 @@ async def send_log(queue):
             while websocket.open:
                 log = await queue.get()
                 await websocket.send(log)
+                # TODO: receive response to confirm especially when server restart
                 queue.task_done()
         except websockets.ConnectionClosed:
             continue
@@ -72,13 +73,10 @@ async def add_finial_log(finial_logs, queue):
         await queue.put(log)
 
 
-def show_info(queue, watch_task, send_task):
-    logging.info(asyncio.all_tasks())
-    logging.info(queue.qsize())
-    for fp in watch_files:
-        logging.info("%s, %s", fp.name, fp.readable())
-    watch_task.print_stack()
-    send_task.print_stack()
+def update_watch():
+    with read_lock:
+        offset_dict = close_open_files(save_offset=True)
+    open_files(seek=True, offset_dict=offset_dict)
 
 
 async def client():
@@ -89,27 +87,34 @@ async def client():
     loop = asyncio.get_running_loop()
     loop.add_signal_handler(signal.SIGTERM, watch_task.cancel)
     loop.add_signal_handler(signal.SIGUSR1, log_rotate, g_queue)
-    loop.add_signal_handler(signal.SIGUSR2, show_info, g_queue, watch_task, send_task)
-    await asyncio.wait([watch_task, send_task], return_when='FIRST_EXCEPTION')
+    loop.add_signal_handler(signal.SIGUSR2, update_watch)
     try:
-        watch_task.exception()
-        send_task.exception()
+        await asyncio.gather(*[watch_task, send_task])
+    except asyncio.CancelledError as e:
+        logging.warning('service terminated: ' + repr(e))
     except Exception as e:
         logging.warning(repr(e), exc_info=True)
-    await g_queue.join()
-    watch_task.cancel()
-    send_task.cancel()
-    close_open_files()
+        watch_task.cancel()
+    finally:
+        await g_queue.join()
+        send_task.cancel()
+        close_open_files()
 
 
-def open_files(seek):
+def open_files(seek=False, offset_dict=None):
+    if offset_dict is None:
+        offset_dict = {}
     try:
+        offset_ino = offset_dict.keys()
         for file in config['WATCH_LOG'].split(' '):
             log_fp = open(file, errors='ignore')
             if log_fp.readable():
-                if seek:
-                    log_size = os.stat(file)[6]
-                    log_fp.seek(log_size)
+                if seek or len(offset_dict) > 0:
+                    stat = os.stat(file)
+                    if stat.st_ino in offset_ino:
+                        log_fp.seek(offset_dict[stat.st_ino])
+                    elif seek:
+                        log_fp.seek(stat[6])
                 watch_files.append(log_fp)
     except Exception as e:
         logging.warning('open log failed: ' + repr(e))
@@ -118,14 +123,19 @@ def open_files(seek):
         exit(0)
 
 
-def close_open_files(read_finial=False):
+def close_open_files(read_finial=False, save_offset=False):
     finial_lines = []
+    offset_dict = {}
     for fp in watch_files:
         if fp.readable():
             if read_finial:
                 finial_lines.extend(fp.readlines())
+            if save_offset:
+                offset_dict[os.stat(fp.name).st_ino] = fp.tell()
             fp.close()
             watch_files.remove(fp)
+    if save_offset:
+        return offset_dict
     return finial_lines
 
 

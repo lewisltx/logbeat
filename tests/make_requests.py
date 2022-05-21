@@ -2,7 +2,7 @@ import time
 
 import requests
 
-REQUEST_URI = 'http://localhost/phpinfo.php'
+REQUEST_URI = 'http://localhost/'
 
 if __name__ == '__main__':
     for i in range(0, 1000):

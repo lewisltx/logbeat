@@ -56,7 +56,7 @@ async def create_table(pool, month=None):
 
 def parse_log(message):
     """
-    {"@timestamp":"2022-05-01T01:00:51+08:00","http_host":"xxx.yyy.zzz","clinetip":"192.168.1.222",
+    {"@timestamp":"2022-05-01T01:00:51+08:00","http_host":"xxx.yyy.zzz","clientip":"192.168.1.222",
     "request":"POST /index.php?id=324 HTTP/1.1","status":"200","size":"44","upstream_addr":"127.0.0.1:9000",
     "upstream_status":"200","upstream_response_time":"0.041","request_time":"0.041",
     "http_referer":"","http_user_agent":"python-requests/2.26.0","http_x_forwarded_for":""}

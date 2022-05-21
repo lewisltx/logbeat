@@ -8,20 +8,6 @@ python 3.7+
 
 MySQL 5.7+
 
-## install
-
-`pip3 install -r requirements.txt`
-
-复制并修改配置文件
-
-`cp .env.template .env`
-
-## log rotate
-
-like nginx
-
-`kill -USR1 $(cat logbeat.pid)`
-
 ## deploy
 
 ```shell
@@ -33,12 +19,19 @@ virtualenv venv
 source venv/bin/activate
 pip install -r requirements.txt
 mkdir logs && chown logbeat.logbeat logs
+
 cp .env.template .env
-# 配置env略
-cp logbeat.ini /etc/supervisor/conf.d/ # 客户端需要修改logbeat_server.py为logbeat_client.py
+# config your own environment variables in .env
+
+# client mast change logbeat_server.py to logbeat_client.py in logbeat.ini
+cp logbeat.ini /etc/supervisor/conf.d/
+
 supervisorctl update
 supervisorctl status logbeat
 
-# 切割日志，仅客户端
+# log rotate link nginx
 supervisorctl signal usr1 logbeat
+
+# safely update watch logs online (WATCH_LOG variable)
+supervisorctl signal usr2 logbeat
 ```
