@@ -1,6 +1,6 @@
 # log-beat
 
-日志收集程序，C/S架构，类似filebeat
+crawl nginx logs to server and save into MySQL
 
 ## requirement
 
@@ -24,7 +24,7 @@ cp .env.template .env
 # config your own environment variables in .env
 
 # client mast change logbeat_server.py to logbeat_client.py in logbeat.ini
-cp logbeat.ini /etc/supervisor/conf.d/
+cp logbeat.conf /etc/supervisor/conf.d/
 
 supervisorctl update
 supervisorctl status logbeat
