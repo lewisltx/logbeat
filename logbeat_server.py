@@ -4,6 +4,7 @@ import json
 import logging
 import signal
 import time
+from hashlib import sha256
 
 import aiomysql
 import websockets
@@ -30,8 +31,8 @@ async def log_insert(pool, row):
             sql = "INSERT INTO " + row_table + "(time, host, client_ip, request_uri, request_query, request_version," \
                                                "request_method, status, size, upstream_addr, upstream_status, " \
                                                "upstream_response_time, request_time, http_referer, user_agent, " \
-                                               "x_forwarded_for) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s," \
-                                               "%s, %s, %s, %s, %s)"
+                                               "x_forwarded_for, sess_tag) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, " \
+                                               "%s, %s, %s, %s, %s, %s, %s, %s, %s)"
             await cursor.execute(sql, tuple(row.values()))
         await conn.commit()
 
@@ -85,6 +86,8 @@ def parse_log(message):
     parsed['http_referer'] = raw_json['http_referer'][0:191]
     parsed['user_agent'] = raw_json['http_user_agent'][0:191]
     parsed['x_forwarded_for'] = raw_json['http_x_forwarded_for'][0:191]
+    parsed['sess_tag'] = '' if 'oks_studious_robot' not in raw_json or len(raw_json['oks_studious_robot']) == 0 else \
+        sha256(raw_json['oks_studious_robot'].encode('utf-8')).hexdigest()
     return parsed
 
 

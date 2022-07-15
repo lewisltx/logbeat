@@ -15,5 +15,6 @@ create table {0}(
 	request_time 	decimal(10,3) unsigned not null,
 	http_referer 	varchar(191) not null,
 	user_agent varchar(191) not null,
+	sess_tag varchar(191) not null,
 	x_forwarded_for varchar(191) not null
 )engine=innodb default charset=utf8mb4
