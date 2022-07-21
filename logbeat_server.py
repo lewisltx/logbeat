@@ -28,11 +28,12 @@ async def log_insert(pool, row):
                 existed_tables.append(created_table)
     async with pool.acquire() as conn:
         async with conn.cursor() as cursor:
-            sql = "INSERT INTO " + row_table + "(time, host, client_ip, request_uri, request_query, request_version," \
-                                               "request_method, status, size, upstream_addr, upstream_status, " \
-                                               "upstream_response_time, request_time, http_referer, user_agent, " \
-                                               "x_forwarded_for, sess_tag) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, " \
-                                               "%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+            sql = "INSERT INTO " + row_table + "(time, host, client_ip, request_uri, request_query, request_version, " \
+                                               "request_method, status, size, upstream_time, upstream_addr, " \
+                                               "upstream_status, upstream_response_time, request_time, " \
+                                               "connection_time, http_referer, user_agent, x_forwarded_for, " \
+                                               "sess_tag) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, " \
+                                               "%s, %s, %s, %s, %s, %s)"
             await cursor.execute(sql, tuple(row.values()))
         await conn.commit()
 
@@ -69,8 +70,9 @@ def parse_log(message):
         return None
     request_arr = raw_json['request'].split(' ')
     request_uri = request_arr[1].split('?')
+    upstream_time = float(raw_json['time']) - float(raw_json['request_time'].replace('-', '0'))
     parsed = {}
-    parsed['time'] = raw_json['@timestamp'][0:19]
+    parsed['time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(float(raw_json['time']))) + raw_json['time'][-4:]
     parsed['host'] = raw_json['http_host']
     parsed['client_ip'] = raw_json['clientip']
     parsed['request_uri'] = request_uri[0][0:191]
@@ -79,10 +81,12 @@ def parse_log(message):
     parsed['request_method'] = request_arr[0]
     parsed['status'] = raw_json['status'].replace('-', '0')
     parsed['size'] = raw_json['size'].replace('-', '0')
+    parsed['upstream_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(upstream_time)) + ('%.3f' % upstream_time)[-4:]
     parsed['upstream_addr'] = raw_json['upstream_addr']
     parsed['upstream_status'] = empty2int(raw_json['upstream_status'].replace('-', '0'))
     parsed['upstream_response_time'] = empty2int(raw_json['upstream_response_time'].replace('-', '0'))
     parsed['request_time'] = raw_json['request_time'].replace('-', '0')
+    parsed['connection_time'] = raw_json['connection_time']
     parsed['http_referer'] = raw_json['http_referer'][0:191]
     parsed['user_agent'] = raw_json['http_user_agent'][0:191]
     parsed['x_forwarded_for'] = raw_json['http_x_forwarded_for'][0:191]
