@@ -38,6 +38,22 @@ async def log_insert(pool, row):
         await conn.commit()
 
 
+async def slow_log_insert(pool, row):
+    if not isinstance(row, dict):
+        return False
+    if 'mysql_slow' not in existed_tables:
+        async with lock:
+            if 'mysql_slow' not in existed_tables:
+                created_table = await create_slow_table(pool)
+                existed_tables.append(created_table)
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            sql = "INSERT INTO mysql_slow(user, host, query_id, query_time, lock_time, rows_sent, rows_examined, " \
+                  "content, time) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) "
+            await cursor.execute(sql, tuple(row.values()))
+        await conn.commit()
+
+
 def read_create_sql():
     with open('create_table.template') as f:
         return "".join(f.readlines())
@@ -50,6 +66,22 @@ async def create_table(pool, month=None):
         async with conn.cursor() as cursor:
             table_name = config['DB_PREFIX'] + month
             sql_content = read_create_sql()
+            sql = sql_content.format(table_name)
+            await cursor.execute(sql)
+        await conn.commit()
+        return table_name
+
+
+def read_slow_sql():
+    with open('create_slow.template') as f:
+        return "".join(f.readlines())
+
+
+async def create_slow_table(pool):
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cursor:
+            table_name = 'mysql_slow'
+            sql_content = read_slow_sql()
             sql = sql_content.format(table_name)
             await cursor.execute(sql)
         await conn.commit()
@@ -99,9 +131,30 @@ def empty2int(s):
     return 0 if len(s) == 0 else s
 
 
+def parse_slow_log(message):
+    """
+    {"type": "mysql_slow_log", "user": "readonly", "host": "192.168.8.12", "query_id": "514412", "query_time": "3.265353",
+     "lock_time": "0.000033", "rows_sent": "0", "rows_examined": "1052915", "timestamp": "1660031855", "content": "select * from `users`
+    where `state` = 0 order by `id` desc limit 1;\n"}
+    """
+    try:
+        raw_json = json.loads(message)
+    except Exception as e:
+        logging.warning(repr(e), exc_info=True)
+        return None
+    del raw_json['type']
+    raw_json['time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(int(raw_json['timestamp'])))
+    del raw_json['timestamp']
+    logging.warning(raw_json)
+    return raw_json
+
+
 async def msg_handler(websocket, mysql_pool):
     async for message in websocket:
-        await log_insert(mysql_pool, parse_log(message))
+        if message.startswith('{"type": "mysql_slow_log",'):
+            await slow_log_insert(mysql_pool, parse_slow_log(message))
+        else:
+            await log_insert(mysql_pool, parse_log(message))
 
 
 async def init_table(pool):
@@ -134,7 +187,7 @@ async def server():
     async with websockets.serve(lambda websocket: msg_handler(websocket, mysql_pool), config['WS_HOST'],
                                 config['WS_PORT'], create_protocol=websockets.basic_auth_protocol_factory(
                 realm="auth", credentials=(config['WS_USER'], config['WS_PASS'])
-            )):
+            ), ping_timeout=None):
         await stop
     mysql_pool.close()
     await mysql_pool.wait_closed()

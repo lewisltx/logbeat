@@ -1,0 +1,12 @@
+create table {0}(
+	id bigint unsigned auto_increment primary key,
+	time datetime not null,
+	user varchar(50) not null,
+	host varchar(50) not null,
+	query_id bigint unsigned not null,
+	query_time 	decimal(12,6) unsigned not null,
+	lock_time 	decimal(12,6) unsigned not null,
+	rows_sent bigint unsigned not null,
+	rows_examined bigint unsigned not null,
+	content longtext not null
+)engine=innodb default charset=utf8mb4
