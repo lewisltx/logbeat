@@ -145,7 +145,7 @@ def parse_slow_log(message):
     del raw_json['type']
     raw_json['time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(int(raw_json['timestamp'])))
     del raw_json['timestamp']
-    logging.warning(raw_json)
+    logging.debug(raw_json)
     return raw_json
 
 
